@@ -6,6 +6,11 @@ def get_health_status():
             "tfidf",
             "bm25",
             "embedding",
+
+
+            "hybrid_parallel",
+            "hybrid_serial",
+
             "ltr",
         ],
     }

@@ -11,7 +11,11 @@ class SearchRequest(BaseModel):
 
     model: str = Field(
         default="bm25",
+
         description="Ranking model: bm25 or tfidf or embedding or ltr",
+
+        description="Ranking model: bm25, tfidf, embedding, hybrid_parallel, hybrid_serial, or ltr",
+
     )
 
     top_k: int = Field(
@@ -41,6 +45,33 @@ class SearchRequest(BaseModel):
         description="BM25 b parameter",
     )
 
+    hybrid_models: Optional[List[str]] = Field(
+        default=None,
+        description="Models to use in hybrid: ['bm25', 'embedding']",
+    )
+
+    hybrid_fusion_method: Optional[str] = Field(
+        default="rrf",
+        description="Fusion method: rrf",
+    )
+
+    hybrid_first_stage: Optional[str] = Field(
+        default="bm25",
+        description="First stage model for serial hybrid",
+    )
+
+    hybrid_second_stage: Optional[str] = Field(
+        default="embedding",
+        description="Second stage model for serial hybrid",
+    )
+
+    hybrid_first_stage_k: int = Field(
+        default=200,
+        ge=10,
+        le=1000,
+        description="Number of candidates retrieved in first stage (serial hybrid)",
+    )
+
 
 class SearchResult(BaseModel):
     rank: int
@@ -60,3 +91,7 @@ class SearchResponse(BaseModel):
 
     k1: Optional[float] = None
     b: Optional[float] = None
+
+    hybrid_type: Optional[str] = None
+    fusion_method: Optional[str] = None
+    models_used: Optional[List[str]] = None
