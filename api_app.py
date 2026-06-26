@@ -9,6 +9,8 @@ sys.path.append(str(PROJECT_ROOT))
 
 from routes.health_route import router as health_router
 from routes.search_route import router as search_router
+from routes.suggest_route import router as suggest_router
+from routes.refine_route import router as refine_router
 
 
 app = FastAPI(
@@ -47,4 +49,16 @@ app.include_router(
     search_router,
     prefix="/api",
     tags=["Search"],
+)
+
+app.include_router(
+    suggest_router,
+    prefix="/api",
+    tags=["Suggest"],
+)
+
+app.include_router(
+    refine_router,
+    prefix="/api",
+    tags=["Refine"],
 )

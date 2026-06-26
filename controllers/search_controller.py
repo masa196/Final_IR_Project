@@ -1,3 +1,4 @@
+import logging
 import sys
 from pathlib import Path
 from functools import lru_cache
@@ -11,21 +12,62 @@ from models.search_model import (
 from services.embedding.embedding_search_service import (
     EmbeddingSearchService,
 )
+from services.ltr.ltr_search_service import (
+    LTRSearchService,
+)
 
+# Make project root importable
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 sys.path.append(str(PROJECT_ROOT))
 
 from services.tfidf.tfidf_search_service import TfidfSearchService
 from services.bm25.bm25_search_service import BM25SearchService
+from services.query_refinement.query_refinement_service import (
+    refine_query,
+)
 
 
-TFIDF_DIRECTORY = PROJECT_ROOT / "indices" / "lotte" / "tfidf"
-BM25_DIRECTORY = PROJECT_ROOT / "indices" / "lotte" / "bm25"
-INVERTED_INDEX_DIRECTORY = PROJECT_ROOT / "indices" / "lotte" / "inverted_index"
-EMBEDDING_DIRECTORY = PROJECT_ROOT / "indices" / "lotte" / "embedding"
+logger = logging.getLogger(__name__)
+
+
+TFIDF_DIRECTORY = (
+    PROJECT_ROOT
+    / "indices"
+    / "lotte"
+    / "tfidf"
+)
+
+BM25_DIRECTORY = (
+    PROJECT_ROOT
+    / "indices"
+    / "lotte"
+    / "bm25"
+)
+
+INVERTED_INDEX_DIRECTORY = (
+    PROJECT_ROOT
+    / "indices"
+    / "lotte"
+    / "inverted_index"
+)
+
+EMBEDDING_DIRECTORY = (
+    PROJECT_ROOT
+    / "indices"
+    / "lotte"
+    / "embedding"
+)
+
+LTR_DIRECTORY = (
+    PROJECT_ROOT
+    / "indices"
+    / "lotte"
+    / "ltr"
+)
 
 
 bm25_lock = Lock()
+ltr_lock = Lock()
 
 
 @lru_cache(maxsize=1)
@@ -44,7 +86,6 @@ def load_bm25_service():
         b=0.75,
     )
 
-
 @lru_cache(maxsize=1)
 def load_embedding_service():
     return EmbeddingSearchService(
@@ -53,9 +94,13 @@ def load_embedding_service():
 
 
 @lru_cache(maxsize=1)
-def load_hybrid_service():
-    from services.hybrid.hybrid_search_service import HybridSearchService
-    return HybridSearchService()
+def load_ltr_service():
+    return LTRSearchService(
+        ltr_directory=LTR_DIRECTORY,
+        inverted_index_directory=INVERTED_INDEX_DIRECTORY,
+        bm25_directory=BM25_DIRECTORY,
+        embedding_directory=EMBEDDING_DIRECTORY,
+    )
 
 
 def normalize_model_name(model_name: str) -> str:
@@ -72,48 +117,64 @@ def normalize_model_name(model_name: str) -> str:
 
     if normalized == "bm25":
         return "bm25"
-
+    
     if normalized == "embedding":
          return "embedding"
 
-    if normalized in ["hybrid-parallel", "hybridparallel"]:
-        return "hybrid_parallel"
-
-    if normalized in ["hybrid-serial", "hybridserial"]:
-        return "hybrid_serial"
+    if normalized == "ltr":
+        return "ltr"
 
     raise ValueError(
-        "Unsupported model. Use 'tfidf', 'bm25', 'embedding', "
-        "'hybrid_parallel', or 'hybrid_serial'."
+        "Unsupported model. Use 'tfidf' or 'bm25' or 'embedding' or 'ltr'."
     )
 
 
 def search_documents(request: SearchRequest) -> SearchResponse:
     model_name = normalize_model_name(request.model)
 
+    if request.use_refinement:
+        try:
+            refined_query = refine_query(request.query)
+            query_modified = refined_query != request.query
+        except Exception as exc:
+            logger.warning("Query refinement failed, falling back to raw query: %s", exc)
+            refined_query = request.query
+            query_modified = False
+    else:
+        refined_query = request.query
+        query_modified = False
+
     if model_name == "tfidf":
         search_service = load_tfidf_service()
+
         raw_response = search_service.search(
-            query=request.query,
+            query=refined_query,
             top_k=request.top_k,
             include_text=request.include_text,
         )
+
         return build_search_response(
             request=request,
             model_name="tfidf",
             raw_response=raw_response,
+            refined_query=refined_query,
+            enhanced=query_modified,
         )
 
     if model_name == "bm25":
         search_service = load_bm25_service()
+
         k1 = float(request.k1)
         b = float(request.b)
 
+        # BM25 service is cached, so we update parameters before searching.
+        # The lock avoids parameter conflicts if multiple requests arrive together.
         with bm25_lock:
             search_service.k1 = k1
             search_service.b = b
+
             raw_response = search_service.search(
-                query=request.query,
+                query=refined_query,
                 top_k=request.top_k,
                 include_text=request.include_text,
             )
@@ -124,75 +185,55 @@ def search_documents(request: SearchRequest) -> SearchResponse:
             raw_response=raw_response,
             k1=k1,
             b=b,
+            refined_query=refined_query,
+            enhanced=query_modified,
         )
-
+    
     if model_name == "embedding":
-        search_service = load_embedding_service()
-        raw_response = search_service.search(
-            query=request.query,
-            top_k=request.top_k,
-            include_text=request.include_text,
-        )
-        return build_search_response(
-            request=request,
-            model_name="embedding",
-            raw_response=raw_response,
-        )
+       search_service = load_embedding_service()
 
-    if model_name == "hybrid_parallel":
-        hybrid_service = load_hybrid_service()
+       raw_response = search_service.search(
+           query=refined_query,
+           top_k=request.top_k,
+           include_text=request.include_text,
+       )
 
-        models = request.hybrid_models or ["bm25", "embedding"]
-        fusion_method = request.hybrid_fusion_method or "rrf"
+       return build_search_response(
+           request=request,
+           model_name="embedding",
+           raw_response=raw_response,
+           refined_query=refined_query,
+           enhanced=query_modified,
+       )
 
-        raw_response = hybrid_service.search_parallel(
-            query=request.query,
-            models=models,
-            fusion_method=fusion_method,
-            top_k=request.top_k,
-            include_text=request.include_text,
-            k1=float(request.k1),
-            b=float(request.b),
-        )
+    if model_name == "ltr":
+        search_service = load_ltr_service()
 
-        return build_search_response(
-            request=request,
-            model_name="hybrid_parallel",
-            raw_response=raw_response,
-            k1=request.k1,
-            b=request.b,
-        )
+        k1 = float(request.k1)
+        b = float(request.b)
 
-    if model_name == "hybrid_serial":
-        hybrid_service = load_hybrid_service()
+        with ltr_lock:
+            search_service.k1 = k1
+            search_service.b = b
 
-        first_stage = request.hybrid_first_stage or "bm25"
-        second_stage = request.hybrid_second_stage or "embedding"
-        first_stage_k = request.hybrid_first_stage_k or 200
-
-        raw_response = hybrid_service.search_serial(
-            query=request.query,
-            first_stage=first_stage,
-            second_stage=second_stage,
-            first_stage_k=first_stage_k,
-            top_k=request.top_k,
-            include_text=request.include_text,
-            k1=float(request.k1),
-            b=float(request.b),
-        )
+            raw_response = search_service.search(
+                query=refined_query,
+                top_k=request.top_k,
+                include_text=request.include_text,
+            )
 
         return build_search_response(
             request=request,
-            model_name="hybrid_serial",
+            model_name="ltr",
             raw_response=raw_response,
-            k1=request.k1,
-            b=request.b,
+            k1=k1,
+            b=b,
+            refined_query=refined_query,
+            enhanced=query_modified,
         )
 
-    raise ValueError(
-        "Unsupported model. Use 'tfidf', 'bm25', 'embedding', "
-        "'hybrid_parallel', or 'hybrid_serial'."
-    )
+    # Unreachable — kept as safety for future model additions
+    raise ValueError(f"Unhandled model: {model_name}")
 
 
 def build_search_response(
@@ -201,6 +242,8 @@ def build_search_response(
     raw_response: dict,
     k1: float | None = None,
     b: float | None = None,
+    refined_query: str | None = None,
+    enhanced: bool = False,
 ) -> SearchResponse:
     results = []
 
@@ -217,10 +260,6 @@ def build_search_response(
             )
         )
 
-    hybrid_type = raw_response.get("hybrid_type")
-    fusion_method = raw_response.get("fusion_method")
-    models_used = raw_response.get("models_used")
-
     return SearchResponse(
         query=request.query,
         model=model_name,
@@ -229,7 +268,6 @@ def build_search_response(
         results=results,
         k1=k1,
         b=b,
-        hybrid_type=hybrid_type,
-        fusion_method=fusion_method,
-        models_used=models_used,
+        refined_query=refined_query,
+        enhanced=enhanced,
     )

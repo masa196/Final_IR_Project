@@ -33,6 +33,7 @@ def search_api(
     model: str,
     top_k: int,
     include_text: bool,
+    use_refinement: bool,
     k1: float,
     b: float,
     hybrid_models=None,
@@ -47,6 +48,7 @@ def search_api(
         "model": model,
         "top_k": top_k,
         "include_text": include_text,
+        "use_refinement": use_refinement,
         "k1": k1,
         "b": b,
     }
@@ -74,10 +76,34 @@ def search_api(
     return response.json()
 
 
+
 st.title("🔎 Information Retrieval Search Engine")
 st.caption("LoTTe Recreation Search — TF-IDF , BM25 , Embedding and Hybrid Representation")
 
+def suggest_api(prefix: str, top_k: int = 5):
+    try:
+        response = requests.post(
+            f"{API_BASE_URL}/suggest",
+            json={"prefix": prefix, "top_k": top_k},
+            timeout=5,
+        )
+        response.raise_for_status()
+        return response.json().get("suggestions", [])
+    except requests.exceptions.RequestException:
+        return []
 
+
+
+# ---------- Session state initialisation ----------
+if "prev_query" not in st.session_state:
+    st.session_state.prev_query = ""
+if "suggestions" not in st.session_state:
+    st.session_state.suggestions = []
+if "query_text" not in st.session_state:
+    st.session_state.query_text = ""
+
+
+# ---------- Sidebar ----------
 with st.sidebar:
     st.header("Search Settings")
 
@@ -89,9 +115,17 @@ with st.sidebar:
         st.error("API Gateway is not running")
         st.caption(api_status.get("message"))
 
+    search_mode = st.radio(
+        "Search Mode",
+        ["Basic Request only", "Basic + Additional Features"],
+        index=1,
+        help="'Basic + Additional Features' enables spell correction, synonym expansion, history boosting, and autocomplete.",
+    )
+    is_refined_mode = search_mode == "Basic + Additional Features"
+
     model_name = st.selectbox(
         "Ranking Model",
-        ["BM25", "TF-IDF", "Embedding", "Hybrid Parallel", "Hybrid Serial"],
+        ["BM25", "TF-IDF", "Embedding", "Hybrid Parallel", "Hybrid Serial", "LTR"],
     )
 
     top_k = st.slider(
@@ -108,10 +142,11 @@ with st.sidebar:
     )
 
     is_bm25 = model_name == "BM25"
+    is_ltr = model_name == "LTR"
     is_hybrid = model_name in ("Hybrid Parallel", "Hybrid Serial")
 
-    if is_bm25:
-        st.subheader("BM25 Parameters")
+    if is_bm25 or is_ltr:
+        st.subheader("BM25 / LTR Parameters")
         k1 = st.slider("k1", min_value=0.5, max_value=3.0, value=1.5, step=0.1)
         b = st.slider("b", min_value=0.0, max_value=1.0, value=0.75, step=0.05)
     elif is_hybrid:
@@ -155,12 +190,43 @@ with st.sidebar:
         )
 
 
+# ---------- Query input (key-bound to session_state) ----------
 query = st.text_input(
     "Enter your query",
     placeholder="do bards have to sing?",
+    key="query_text",
 )
 
+# ---------- Autocomplete suggestion chips ----------
+if is_refined_mode and query.strip():
+    current_prefix = query.strip().lower()
+    if (
+        len(current_prefix) >= 2
+        and current_prefix != st.session_state.prev_query
+    ):
+        st.session_state.suggestions = suggest_api(
+            current_prefix, top_k=5
+        )
+        st.session_state.prev_query = current_prefix
 
+    if st.session_state.suggestions:
+        st.caption("Suggestions:")
+        cols = st.columns(len(st.session_state.suggestions))
+        for idx, suggestion in enumerate(st.session_state.suggestions):
+            with cols[idx]:
+                if st.button(
+                    suggestion,
+                    key=f"suggest_{idx}",
+                    type="tertiary",
+                    use_container_width=True,
+                ):
+                    st.session_state.query_text = suggestion
+                    st.rerun()
+else:
+    st.session_state.suggestions = []
+
+
+# ---------- Search execution ----------
 search_clicked = st.button(
     "Search",
     type="primary",
@@ -185,9 +251,13 @@ if search_clicked:
             if model_name == "TF-IDF"
             else "embedding"
             if model_name == "Embedding"
+
             else "hybrid_parallel"
             if model_name == "Hybrid Parallel"
             else "hybrid_serial"
+
+            else "ltr"
+
         )
 
         try:
@@ -197,6 +267,7 @@ if search_clicked:
                     model=model_for_api,
                     top_k=top_k,
                     include_text=include_text,
+                    use_refinement=is_refined_mode,
                     k1=k1,
                     b=b,
                     hybrid_models=hybrid_models,
@@ -206,6 +277,18 @@ if search_clicked:
                     hybrid_second_stage=hybrid_second_stage,
                     hybrid_first_stage_k=hybrid_first_stage_k,
                 )
+
+            # ---------- Refinement info banner ----------
+            if is_refined_mode:
+                if response.get("enhanced"):
+                    st.success(
+                        f"Query Enhanced: "
+                        f"**{response['refined_query']}**"
+                    )
+                else:
+                    st.caption("Basic Request — no refinement applied")
+            else:
+                st.caption("Basic Request — no refinement applied")
 
             st.subheader("Search Summary")
 
@@ -236,7 +319,7 @@ if search_clicked:
                 col2.metric("Top K", response["top_k"])
                 col3.metric("Results", len(response["results"]))
 
-            if response["model"] == "bm25" or is_hybrid_resp:
+            if response["model"] in ("bm25", "ltr") or is_hybrid_resp:
                 cols = st.columns(2)
                 cols[0].metric("k1", response.get("k1"))
                 cols[1].metric("b", response.get("b"))
@@ -248,6 +331,7 @@ if search_clicked:
                         str(response["processed_query"]),
                         language="python",
                     )
+
 
             st.subheader("Results")
 

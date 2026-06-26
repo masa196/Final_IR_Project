@@ -8,5 +8,6 @@ def get_health_status():
             "embedding",
             "hybrid_parallel",
             "hybrid_serial",
+            "ltr",
         ],
     }

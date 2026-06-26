@@ -11,7 +11,7 @@ class SearchRequest(BaseModel):
 
     model: str = Field(
         default="bm25",
-        description="Ranking model: bm25, tfidf, embedding, hybrid_parallel, or hybrid_serial",
+        description="Ranking model: bm25, tfidf, embedding, hybrid_parallel, hybrid_serial, or ltr",
     )
 
     top_k: int = Field(
@@ -24,6 +24,11 @@ class SearchRequest(BaseModel):
     include_text: bool = Field(
         default=True,
         description="Whether to include raw document text in results",
+    )
+
+    use_refinement: bool = Field(
+        default=True,
+        description="Whether to apply query refinement (spell correction, synonyms, boosting)",
     )
 
     k1: Optional[float] = Field(
@@ -77,6 +82,8 @@ class SearchResponse(BaseModel):
     top_k: int
     processed_query: List[str]
     results: List[SearchResult]
+    refined_query: Optional[str] = None
+    enhanced: bool = Field(default=False, description="Whether query enhancements were applied")
 
     k1: Optional[float] = None
     b: Optional[float] = None
