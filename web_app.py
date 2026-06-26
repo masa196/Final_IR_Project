@@ -208,6 +208,11 @@ with st.sidebar:
 
 
 
+# ---------- Callback for suggestion buttons ----------
+def _apply_suggestion(suggestion: str):
+    st.session_state.query_text = suggestion
+
+
 # ---------- Query input (key-bound to session_state) ----------
 query = st.text_input(
     "Enter your query",
@@ -237,9 +242,10 @@ if is_refined_mode and query.strip():
                     key=f"suggest_{idx}",
                     type="tertiary",
                     use_container_width=True,
+                    on_click=_apply_suggestion,
+                    args=(suggestion,),
                 ):
-                    st.session_state.query_text = suggestion
-                    st.rerun()
+                    pass
 else:
     st.session_state.suggestions = []
 
