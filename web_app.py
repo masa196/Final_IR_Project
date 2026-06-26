@@ -130,11 +130,7 @@ with st.sidebar:
 
     model_name = st.selectbox(
         "Ranking Model",
-
-        ["BM25", "TF-IDF", "Embedding", "LTR"],
-
         ["BM25", "TF-IDF", "Embedding", "Hybrid Parallel", "Hybrid Serial", "LTR"],
-
     )
 
     top_k = st.slider(
@@ -201,7 +197,7 @@ with st.sidebar:
         )
 
 
->>>>>>> b994f3430048b487f656425d8a97036958fe8528
+
 # ---------- Query input (key-bound to session_state) ----------
 query = st.text_input(
     "Enter your query",
@@ -263,17 +259,11 @@ if search_clicked:
             if model_name == "TF-IDF"
             else "embedding"
             if model_name == "Embedding"
-
-            else "ltr"
-
-
             else "hybrid_parallel"
             if model_name == "Hybrid Parallel"
             else "hybrid_serial"
-
+            if model_name == "Hybrid Serial"
             else "ltr"
-
-
         )
 
         try:

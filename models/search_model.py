@@ -11,11 +11,7 @@ class SearchRequest(BaseModel):
 
     model: str = Field(
         default="bm25",
-
-        description="Ranking model: bm25 or tfidf or embedding or ltr",
-
         description="Ranking model: bm25, tfidf, embedding, hybrid_parallel, hybrid_serial, or ltr",
-
     )
 
     top_k: int = Field(
