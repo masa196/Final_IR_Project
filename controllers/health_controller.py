@@ -5,6 +5,7 @@ def get_health_status():
         "available_models": [
             "tfidf",
             "bm25",
-            "embedding"
+            "embedding",
+            "ltr",
         ],
     }

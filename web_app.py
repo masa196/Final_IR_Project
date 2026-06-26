@@ -33,6 +33,7 @@ def search_api(
     model: str,
     top_k: int,
     include_text: bool,
+    use_refinement: bool,
     k1: float,
     b: float,
 ):
@@ -41,6 +42,7 @@ def search_api(
         "model": model,
         "top_k": top_k,
         "include_text": include_text,
+        "use_refinement": use_refinement,
         "k1": k1,
         "b": b,
     }
@@ -55,10 +57,29 @@ def search_api(
     return response.json()
 
 
-st.title("🔎 Information Retrieval Search Engine")
-st.caption("LoTTe Recreation Search — TF-IDF , BM25 and Embedding ")
+def suggest_api(prefix: str, top_k: int = 5):
+    try:
+        response = requests.post(
+            f"{API_BASE_URL}/suggest",
+            json={"prefix": prefix, "top_k": top_k},
+            timeout=5,
+        )
+        response.raise_for_status()
+        return response.json().get("suggestions", [])
+    except requests.exceptions.RequestException:
+        return []
 
 
+# ---------- Session state initialisation ----------
+if "prev_query" not in st.session_state:
+    st.session_state.prev_query = ""
+if "suggestions" not in st.session_state:
+    st.session_state.suggestions = []
+if "query_text" not in st.session_state:
+    st.session_state.query_text = ""
+
+
+# ---------- Sidebar ----------
 with st.sidebar:
     st.header("Search Settings")
 
@@ -70,9 +91,17 @@ with st.sidebar:
         st.error("API Gateway is not running")
         st.caption(api_status.get("message"))
 
+    search_mode = st.radio(
+        "Search Mode",
+        ["Basic Request only", "Basic + Additional Features"],
+        index=1,
+        help="'Basic + Additional Features' enables spell correction, synonym expansion, history boosting, and autocomplete.",
+    )
+    is_refined_mode = search_mode == "Basic + Additional Features"
+
     model_name = st.selectbox(
         "Ranking Model",
-        ["BM25", "TF-IDF", "Embedding"],
+        ["BM25", "TF-IDF", "Embedding", "LTR"],
     )
 
     top_k = st.slider(
@@ -112,12 +141,43 @@ with st.sidebar:
         b = 0.75
 
 
+# ---------- Query input (key-bound to session_state) ----------
 query = st.text_input(
     "Enter your query",
     placeholder="do bards have to sing?",
+    key="query_text",
 )
 
+# ---------- Autocomplete suggestion chips ----------
+if is_refined_mode and query.strip():
+    current_prefix = query.strip().lower()
+    if (
+        len(current_prefix) >= 2
+        and current_prefix != st.session_state.prev_query
+    ):
+        st.session_state.suggestions = suggest_api(
+            current_prefix, top_k=5
+        )
+        st.session_state.prev_query = current_prefix
 
+    if st.session_state.suggestions:
+        st.caption("Suggestions:")
+        cols = st.columns(len(st.session_state.suggestions))
+        for idx, suggestion in enumerate(st.session_state.suggestions):
+            with cols[idx]:
+                if st.button(
+                    suggestion,
+                    key=f"suggest_{idx}",
+                    type="tertiary",
+                    use_container_width=True,
+                ):
+                    st.session_state.query_text = suggestion
+                    st.rerun()
+else:
+    st.session_state.suggestions = []
+
+
+# ---------- Search execution ----------
 search_clicked = st.button(
     "Search",
     type="primary",
@@ -141,6 +201,8 @@ if search_clicked:
             else "tfidf"
             if model_name == "TF-IDF"
             else "embedding"
+            if model_name == "Embedding"
+            else "ltr"
         )
 
         try:
@@ -150,9 +212,22 @@ if search_clicked:
                     model=model_for_api,
                     top_k=top_k,
                     include_text=include_text,
+                    use_refinement=is_refined_mode,
                     k1=k1,
                     b=b,
                 )
+
+            # ---------- Refinement info banner ----------
+            if is_refined_mode:
+                if response.get("enhanced"):
+                    st.success(
+                        f"Query Enhanced: "
+                        f"**{response['refined_query']}**"
+                    )
+                else:
+                    st.caption("Basic Request — no refinement applied")
+            else:
+                st.caption("Basic Request — no refinement applied")
 
             st.subheader("Search Summary")
 
@@ -186,12 +261,12 @@ if search_clicked:
                     response.get("b"),
                 )
 
-                if response["model"] != "embedding":
-                 st.subheader("Processed Query")
-                 st.code(
-                   str(response["processed_query"]),
-                  language="python",
-                   )
+            if response["model"] != "embedding":
+                st.subheader("Processed Query")
+                st.code(
+                    str(response["processed_query"]),
+                    language="python",
+                )
 
             st.subheader("Results")
 
