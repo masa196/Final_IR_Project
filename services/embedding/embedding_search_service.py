@@ -128,3 +128,42 @@ class EmbeddingSearchService:
             "result_ids": result_ids,
             "results": ranked_results,
         }
+     # --- دالة البحث عبر FAISS مع بناء الفهرس عند الطلب فقط (Lazy Loading) ---
+    def search_with_faiss(self, query: str, top_k: int = 10, include_text: bool = True) -> dict:
+        import faiss
+        
+        # بناء الفهرس وحجز الذاكرة له الآن فقط، إذا لم يكن مبنياً من قبل
+        if not hasattr(self, 'faiss_index') or self.faiss_index is None:
+            print("🏗 Vector Store requested! Building FAISS index in memory now...")
+            self.faiss_embeddings = np.array(self.document_embeddings).astype('f4')
+            dimension = self.faiss_embeddings.shape[1]
+            self.faiss_index = faiss.IndexFlatIP(dimension)
+            self.faiss_index.add(self.faiss_embeddings)
+            print("✅ FAISS index built successfully on-demand.")
+            
+        # إجراء عملية البحث المعتادة عبر FAISS
+        query_embedding = self.model.encode([query], show_progress_bar=False, convert_to_numpy=True).astype('f4')
+        scores, indices = self.faiss_index.search(query_embedding, top_k)
+        
+        ranked_results = []
+        result_ids = []
+        for score, idx in zip(scores[0], indices[0]):
+            if idx != -1 and idx < len(self.document_ids):
+                doc_id = str(self.document_ids[idx])
+                ranked_results.append({
+                    "doc_id": doc_id,
+                    "score": float(score),
+                })
+                result_ids.append(doc_id)
+                
+        if include_text and result_ids:
+            raw_documents = get_raw_documents_by_ids(result_ids)
+            raw_text_by_id = {str(doc["doc_id"]): doc["text"] for doc in raw_documents}
+            for result in ranked_results:
+                result["text"] = raw_text_by_id.get(str(result["doc_id"]), "Original text was not found in SQLite.")
+
+        return {
+            "query": query,
+            "result_ids": result_ids,
+            "results": ranked_results,
+        }

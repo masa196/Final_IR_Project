@@ -36,12 +36,14 @@ def search_api(
     use_refinement: bool,
     k1: float,
     b: float,
+    use_vector_store: bool, 
     hybrid_models=None,
     hybrid_fusion_method=None,
     hybrid_weights=None,
     hybrid_first_stage=None,
     hybrid_second_stage=None,
     hybrid_first_stage_k=None,
+     
 ):
     payload = {
         "query": query,
@@ -51,6 +53,7 @@ def search_api(
         "use_refinement": use_refinement,
         "k1": k1,
         "b": b,
+        "use_vector_store": use_vector_store,
     }
 
     if hybrid_models:
@@ -109,6 +112,7 @@ if "query_text" not in st.session_state:
 
 
 # ---------- Sidebar ----------
+use_vector_store = False
 with st.sidebar:
     st.header("Search Settings")
 
@@ -132,6 +136,12 @@ with st.sidebar:
         "Ranking Model",
         ["BM25", "TF-IDF", "Embedding", "Hybrid Parallel", "Hybrid Serial", "LTR"],
     )
+    if model_name == "Embedding":
+        use_vector_store = st.checkbox(
+            "Use Vector Store (FAISS)",
+            value=False,
+            help="Toggle between standard Cosine Similarity and optimized FAISS search."
+        )
 
     top_k = st.slider(
         "Number of results",
@@ -282,6 +292,7 @@ if search_clicked:
                     hybrid_first_stage=hybrid_first_stage,
                     hybrid_second_stage=hybrid_second_stage,
                     hybrid_first_stage_k=hybrid_first_stage_k,
+                    use_vector_store=use_vector_store
                 )
 
             # ---------- Refinement info banner ----------
